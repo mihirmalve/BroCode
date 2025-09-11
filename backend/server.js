@@ -14,7 +14,7 @@ import dbConnect from "./services/dbConnect.js"
 
 import {app, server} from './socket/socket.js'
 
-dotenv.config({ path: '../.env' })
+dotenv.config()
 
 app.use(cors({
   origin: "http://localhost:3000",  // your frontend URL

@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
-dotenv.config({ path: "../.env" });
+dotenv.config();
 
 const secret_token = process.env.ACCESS_TOKEN_SECRET;
 
@@ -12,7 +12,7 @@ class tokenService {
         res.cookie("jwt", token, {
             maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
             httpOnly: true,
-            sameSite: "strict",
+            sameSite: "none",
             secure: process.env.NODE_ENV === "production"
         });
     }
