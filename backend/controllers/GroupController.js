@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import userModel from "../models/userModel.js";
 import groupModel from "../models/groupModel.js";
 
-class GroupController {
+class groupController {
   async createGroup(req, res) {
     try {
       const { name, description, password } = req.body;
@@ -206,4 +206,4 @@ async leaveGroup(req, res) {
 }
 
 }
-export default new GroupController();
+export default new groupController();
