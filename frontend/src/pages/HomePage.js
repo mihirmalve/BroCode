@@ -6,6 +6,7 @@ import CreateGroupPage from "./CreateGroupPage";
 import JoinGroupPage from "./JoinGroupPage";
 import { useNavigate } from "react-router-dom";
 import { useCallback } from "react";
+import { BACKEND_URL } from "./GlobalVariable";
 
 function HomePage() {
   const navigate = useNavigate();
@@ -13,7 +14,7 @@ function HomePage() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await axios.get("http://localhost:8000/protect", {
+        const res = await axios.get(`${BACKEND_URL}/protect`, {
           withCredentials: true,
         });
         if (res.data?.error) {
@@ -32,7 +33,7 @@ function HomePage() {
   const fetchGroups = async () => {
     try {
       const res = await axios.post(
-        "http://localhost:8000/groups",
+        `${BACKEND_URL}/groups`,
         {},
         {
           withCredentials: true,
@@ -51,7 +52,7 @@ function HomePage() {
   const fetchCode = async (lang) => {
   try {
     const res = await axios.post(
-  "http://localhost:8000/getCode",
+  `${BACKEND_URL}/getCode`,
   { language },
   { withCredentials: true }
 );
@@ -86,7 +87,7 @@ function HomePage() {
     debounce(async (lang, code) => {
       try {
         await axios.post(
-          "http://localhost:8000/saveCode",
+          `${BACKEND_URL}/saveCode`,
           { language: lang, code },
           { withCredentials: true }
         );
@@ -100,7 +101,7 @@ function HomePage() {
 
   const handleLogout = async () => {
     try {
-      await axios.post("http://localhost:8000/logout", null, {
+      await axios.post(`${BACKEND_URL}/logout`, null, {
         withCredentials: true,
       });
       localStorage.removeItem("user-data");
@@ -124,7 +125,7 @@ function HomePage() {
 
   const handleCompile = async () => {
     try {
-      const res = await axios.post("http://localhost:8000/compile", {
+      const res = await axios.post(`${BACKEND_URL}/compile`, {
         code: codes[language] || "",
         language,
         input,

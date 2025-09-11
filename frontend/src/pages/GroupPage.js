@@ -9,6 +9,7 @@ import GroupInfo from "./GroupInfo";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useCallback } from "react";
+import { BACKEND_URL } from "./GlobalVariable";
 
 export default function GroupPage() {
   const { socket } = React.useContext(SocketContext);
@@ -148,7 +149,7 @@ export default function GroupPage() {
   const fetchCodeGroup = async (lang) => {
   try {
     const res = await axios.post(
-      "http://localhost:8000/getCodeGroup",
+      `${BACKEND_URL}/getCodeGroup`,
       { language: lang, groupId },
       { withCredentials: true }
     );
@@ -240,7 +241,7 @@ export default function GroupPage() {
       debounce(async (lang, code) => {
         try {
           await axios.post(
-            "http://localhost:8000/saveCodeGroup",
+            `${BACKEND_URL}/saveCodeGroup`,
             { language: lang, code, groupId },
             { withCredentials: true }
           );
@@ -254,7 +255,7 @@ export default function GroupPage() {
 
   const handleCompile = async () => {
     try {
-      const res = await axios.post("http://localhost:8000/compile", {
+      const res = await axios.post(`${BACKEND_URL}/compile`, {
         code: codes[language] || "",
         language,
         input,

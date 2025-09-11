@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import toast from "react-hot-toast";
+import { BACKEND_URL } from "./GlobalVariable";
 
 export default function MyProfile() {
   const navigate = useNavigate();
@@ -33,7 +34,7 @@ export default function MyProfile() {
   const confirmDelete = async () => {
     try {
       const res = await axios.post(
-        "http://localhost:8000/deleteGroup",
+        `${BACKEND_URL}//deleteGroup`,
         { groupId: groupToDelete._id },
         {
           withCredentials: true,
@@ -67,7 +68,7 @@ export default function MyProfile() {
     const handleProfile = async () => {
       try {
         const res = await axios.post(
-          "http://localhost:8000/getProfile",
+          `${BACKEND_URL}/getProfile`,
           {},
           {
             withCredentials: true,

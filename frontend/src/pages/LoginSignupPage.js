@@ -3,12 +3,13 @@ import background from "./back1.jpg";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
+import { BACKEND_URL } from "./GlobalVariable";
 
 function LoginSignupPage() {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await axios.get("http://localhost:8000/protect", {
+        const res = await axios.get(`${BACKEND_URL}/protect`, {
           withCredentials: true,
         });
         if (res.data?.error) {
@@ -93,7 +94,7 @@ function LoginSignupPage() {
       return;
     }
 
-    const res1 = await axios.post("http://localhost:8000/checkUserAndEmail", {
+    const res1 = await axios.post(`${BACKEND_URL}/checkUserAndEmail`, {
       email,
       username,
     });
@@ -110,7 +111,7 @@ function LoginSignupPage() {
       return;
     }
 
-    const res = await axios.post("http://localhost:8000/sendOtp", { email });
+    const res = await axios.post(`${BACKEND_URL}/sendOtp`, { email });
     setOtp(res.data.otp);
     setIsOtpSent(true);
     toast.info(`OTP sent to ${email}`);
@@ -128,7 +129,7 @@ function LoginSignupPage() {
   const handleSignin = async () => {
     try {
       const res = await axios.post(
-        "http://localhost:8000/signin",
+        `${BACKEND_URL}/signin`,
         {
           email,
           password,
@@ -174,7 +175,7 @@ function LoginSignupPage() {
       return;
     }
 
-    const res = await axios.post("http://localhost:8000/signup", {
+    const res = await axios.post(`${BACKEND_URL}/signup`, {
       name,
       username,
       age,

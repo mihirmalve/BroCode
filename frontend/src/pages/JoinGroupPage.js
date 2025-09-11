@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
+import { BACKEND_URL } from "./GlobalVariable";
 
 const JoinGroupPage = ({ show, setShow,refreshGroups }) => {
   const [groupName, setGroupName] = useState("");
@@ -22,7 +23,7 @@ const JoinGroupPage = ({ show, setShow,refreshGroups }) => {
         password: groupPassword,
       };
 
-      const res = await axios.post("http://localhost:8000/join", data, {
+      const res = await axios.post(`${BACKEND_URL}/join`, data, {
         withCredentials: true,
       });
 

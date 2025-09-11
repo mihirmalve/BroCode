@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
-import { useNavigate } from "react-router-dom"; // CORRECTED: Import the 'useNavigate' hook
+import { useNavigate } from "react-router-dom";
+import { BACKEND_URL } from "./GlobalVariable"; // CORRECTED: Import the 'useNavigate' hook
 
 const GroupInfo = ({ groupId, userId, setShowGroupInfo, onlineUsers }) => {
   const [members, setMembers] = useState([]);
@@ -15,7 +16,7 @@ const GroupInfo = ({ groupId, userId, setShowGroupInfo, onlineUsers }) => {
       setLoading(true);
       try {
         const res = await axios.post(
-          `http://localhost:8000/info`,
+          `${BACKEND_URL}/info`,
           { groupId },
           { withCredentials: true }
         );
@@ -34,7 +35,7 @@ const GroupInfo = ({ groupId, userId, setShowGroupInfo, onlineUsers }) => {
   const handleKickUser = async (memberIdToKick) => {
     try {
       await axios.post(
-        `http://localhost:8000/kick`,
+        `${BACKEND_URL}/kick`,
         { groupId, userId: memberIdToKick },
         { withCredentials: true }
       );
@@ -48,7 +49,7 @@ const GroupInfo = ({ groupId, userId, setShowGroupInfo, onlineUsers }) => {
   const handleLeaveGroup = async () => {
     try {
       await axios.post(
-        `http://localhost:8000/leave`,
+        `${BACKEND_URL}/leave`,
         { groupId },
         { withCredentials: true }
       );

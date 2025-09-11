@@ -4,6 +4,7 @@ import React, {
     useState,
   } from 'react';
   import io from 'socket.io-client';
+  import { BACKEND_URL } from "../pages/GlobalVariable";
   
   export const SocketContext = createContext();
   
@@ -15,7 +16,7 @@ import React, {
 
     useEffect(() => {  
       if (user_data) {
-        const newSocket = io("http://localhost:8000", {
+        const newSocket = io(`${BACKEND_URL}`, {
           query: { userId },
           withCredentials: true,
         });

@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
+import { BACKEND_URL } from "./GlobalVariable";
 
 const CreateGroupPage = ({ show, setShow,refreshGroups }) => {
   const onClose = () => {
@@ -18,7 +19,7 @@ const CreateGroupPage = ({ show, setShow,refreshGroups }) => {
         password: groupPassword,
       };
 
-      const res = await axios.post("http://localhost:8000/create", data, {
+      const res = await axios.post(`${BACKEND_URL}/create`, data, {
         withCredentials: true,
       });
 
