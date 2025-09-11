@@ -17,7 +17,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "https://68c2bc5c591f2e00084540fc--b2gangs.netlify.app/",
     methods: ["GET", "POST"],
     credentials: true,
   },

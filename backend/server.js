@@ -17,7 +17,7 @@ import {app, server} from './socket/socket.js'
 dotenv.config()
 
 app.use(cors({
-  origin: "http://localhost:3000",  // your frontend URL
+  origin: "https://68c2bc5c591f2e00084540fc--b2gangs.netlify.app/",  // your frontend URL
   credentials: true
 }));
 
