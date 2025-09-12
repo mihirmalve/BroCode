@@ -17,7 +17,7 @@ import {app, server} from './socket/socket.js'
 dotenv.config()
 
 app.use(cors({
-  origin: "*", // allow all origins for testing; change in production
+  origin: "https://b2code.netlify.app", // allow all origins for testing; change in production
   credentials: true
 }));
 

@@ -17,7 +17,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // allow all origins for testing; change in production
+    origin: "https://b2code.netlify.app", // allow all origins for testing; change in production
     methods: ["GET", "POST"],
     credentials: true,
   },
