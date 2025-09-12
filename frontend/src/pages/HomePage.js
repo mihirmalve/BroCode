@@ -21,9 +21,7 @@ function HomePage() {
           console.log(res.data.error);
           navigate("/");
         } else {
-          if (window.location.pathname !== "/home") {
-            navigate("/home");
-          }
+          navigate("/home");
         }
       } catch (err) {
         navigate("/");
