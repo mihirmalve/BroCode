@@ -17,7 +17,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "https://68c2cb1e6867be2d54149275--aquamarine-bonbon-ba22bb.netlify.app/",
+    origin: "*", // allow all origins for testing; change in production
     methods: ["GET", "POST"],
     credentials: true,
   },

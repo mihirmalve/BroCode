@@ -17,7 +17,7 @@ import {app, server} from './socket/socket.js'
 dotenv.config()
 
 app.use(cors({
-  origin: "https://68c2cb1e6867be2d54149275--aquamarine-bonbon-ba22bb.netlify.app/",  // your frontend URL
+  origin: "*", // allow all origins for testing; change in production
   credentials: true
 }));
 
