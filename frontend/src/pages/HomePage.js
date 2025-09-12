@@ -7,9 +7,11 @@ import JoinGroupPage from "./JoinGroupPage";
 import { useNavigate } from "react-router-dom";
 import { useCallback } from "react";
 import { BACKEND_URL } from "./GlobalVariable";
+//import { useState } from "react";
 
 function HomePage() {
   const navigate = useNavigate();
+  //const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -101,13 +103,17 @@ function HomePage() {
 
   const handleLogout = async () => {
     try {
+     //setIsLoggingOut(true);
       await axios.post(`${BACKEND_URL}/logout`, null, {
         withCredentials: true,
       });
       localStorage.removeItem("user-data");
-      navigate("/");
+      setTimeout(() => {
+        navigate("/");
+      }, 300);
     } catch (err) {
       console.log(err);
+      //setIsLoggingOut(false);
     }
   };
   const GroupClickHandler = (group) => {
