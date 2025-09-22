@@ -1,20 +1,27 @@
 import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import axios from "axios";
 import SocketContext from "../context/socketContext";
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
 import GroupInfo from "./GroupInfo";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useCallback } from "react";
-import { BACKEND_URL } from "./GlobalVariable";
+
+// Helper debounce function
+const debounce = (func, delay) => {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => func(...args), delay);
+    };
+};
 
 export default function GroupPage() {
   const { socket } = React.useContext(SocketContext);
   const navigate = useNavigate();
-  const [codes, setCodes] = useState({});
+  
+  // State for UI elements, not for the editor's content
   const [output, setOutput] = useState("");
   const [language, setLanguage] = useState("cpp");
   const [input, setInput] = useState("");
@@ -23,11 +30,13 @@ export default function GroupPage() {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
 
+  // Refs for managing Yjs, Monaco, and bindings
   const editorRef = useRef(null);
   const ydocRef = useRef(null);
-  const yTextRef = useRef(null);
+  const yTextRef = useRef(null); // Will now point to the Y.Text for the current language
   const undoManagerRef = useRef(null);
   const chatEndRef = useRef(null);
+  const unbindEditorRef = useRef(null); // Ref to store the editor binding cleanup function
 
   const userId = localStorage.getItem("user-data")
     ? JSON.parse(localStorage.getItem("user-data"))._id
@@ -38,18 +47,31 @@ export default function GroupPage() {
 
   const { groupId } = useParams();
 
-  // --- NEW: bind editor to Yjs properly ---
+  // useCallback to memoize the binding function
   const bindEditorToYjs = useCallback((editor, yText) => {
     if (!editor || !yText) return;
-
     const model = editor.getModel();
     model.setValue(yText.toString());
 
-    // Flag to prevent loop
     let updatingFromYjs = false;
 
-    // Editor changes → Yjs
-    const editorListener = editor.onDidChangeModelContent((event) => {
+    // Yjs changes -> Editor
+    const yjsObserver = () => {
+      updatingFromYjs = true;
+      const yContent = yText.toString();
+      if (model.getValue() !== yContent) {
+        const currentPosition = editor.getPosition();
+        model.setValue(yContent);
+        if (currentPosition) {
+            editor.setPosition(currentPosition);
+        }
+      }
+      updatingFromYjs = false;
+    };
+    yText.observe(yjsObserver);
+
+    // Editor changes -> Yjs
+    const editorListener = editor.onDidChangeModelContent(() => {
       if (updatingFromYjs) return;
       const value = editor.getValue();
       if (yText.toString() !== value) {
@@ -60,236 +82,168 @@ export default function GroupPage() {
       }
     });
 
-    const yjsObserver = (event) => {
-      const yContent = yText.toString();
-      if (model.getValue() !== yContent) {
-        const cursor = editor.getPosition();
-        updatingFromYjs = true;
-        model.pushEditOperations(
-          [],
-          [{ range: model.getFullModelRange(), text: yContent }],
-          () => [cursor] // restore cursor
-        );
-        updatingFromYjs = false;
-      }
-    };
-    yText.observe(yjsObserver);
-
-    // Cleanup function
+    // Return a cleanup function
     return () => {
       editorListener.dispose();
       yText.unobserve(yjsObserver);
     };
   }, []);
 
+  // Function to handle mounting of the Monaco Editor
   const handleEditorDidMount = (editor) => {
     editorRef.current = editor;
-    if (ydocRef.current && yTextRef.current) {
-      bindEditorToYjs(editor, yTextRef.current)();
-    }
+    // The binding logic is now handled in the useEffect that watches `language`
   };
 
+  // Debounced save function, memoized with useCallback
+  const saveCodeToBackend = useCallback(
+    debounce(async (lang, code) => {
+      try {
+        await axios.post(
+          "http://localhost:8000/saveCodeGroup",
+          { language: lang, code, groupId },
+          { withCredentials: true }
+        );
+        console.log(`Code for ${lang} saved to backend.`);
+      } catch (err) {
+        console.error("Failed to save code", err);
+      }
+    }, 1500),
+    [groupId]
+  );
+
+  // Main useEffect to set up Yjs and socket listeners (runs once, but depends on language for saving)
   useEffect(() => {
     if (!groupId || !socket) return;
-
+    
     const ydoc = new Y.Doc();
-    const yText = ydoc.getText("text");
-    const undoManager = new Y.UndoManager(yText);
-
     ydocRef.current = ydoc;
-    yTextRef.current = yText;
-    undoManagerRef.current = undoManager;
 
-    // Socket callbacks
-    const handleSync = (initialContent) => {
-      if (initialContent && yText.toString() === "") {
-        yText.insert(0, initialContent);
+    const handleDocumentUpdate = (update) => {
+      Y.applyUpdate(ydoc, new Uint8Array(update), 'remote');
+    };
+
+    socket.on("documentUpdated", handleDocumentUpdate);
+
+    // This observer handles broadcasting local changes and saving them.
+    const observer = (update, origin) => {
+      if (origin !== 'remote') {
+        // This is a local change, so broadcast and save.
+        socket.emit("updateDocument", Array.from(update));
+        if (yTextRef.current) {
+          saveCodeToBackend(language, yTextRef.current.toString());
+        }
+      }
+    };
+    ydoc.on("update", observer);
+
+    return () => {
+      socket.off("documentUpdated", handleDocumentUpdate);
+      ydoc.off("update", observer);
+      ydoc.destroy();
+    };
+  }, [groupId, socket, language, saveCodeToBackend]);
+
+  // useEffect to handle language switching
+  useEffect(() => {
+    if (!ydocRef.current || !editorRef.current) return;
+
+    // 1. Clean up any existing editor binding
+    if (unbindEditorRef.current) {
+      unbindEditorRef.current();
+    }
+    
+    // 2. Get the Y.Text for the selected language. This creates it if it doesn't exist.
+    const yText = ydocRef.current.getText(language);
+    yTextRef.current = yText;
+
+    // 3. Set up the undo manager for the current Y.Text
+    undoManagerRef.current = new Y.UndoManager(yText);
+    
+    // 4. Bind the editor to the new Y.Text and store the cleanup function
+    unbindEditorRef.current = bindEditorToYjs(editorRef.current, yText);
+
+    // 5. Fetch initial code from the backend ONLY if this language's doc is empty
+    const fetchInitialCode = async () => {
+      if (yText.toString() === "") {
+        try {
+          const res = await axios.post(
+            "http://localhost:8000/getCodeGroup",
+            { language, groupId },
+            { withCredentials: true }
+          );
+          const initialCode = res.data.code || `// Write your ${language} code here`;
+          yText.insert(0, initialCode);
+        } catch (err) {
+          console.error(`Failed to fetch code for ${language}`, err);
+        }
       }
     };
 
-    const handleDocumentUpdate = (update) => {
-      Y.applyUpdate(ydoc, new Uint8Array(update));
-    };
-
-    socket.on("sync", handleSync);
-    socket.on("documentUpdated", handleDocumentUpdate);
-
-    let unbindEditor = null;
-    if (editorRef.current) {
-      unbindEditor = bindEditorToYjs(editorRef.current, yText);
-    }
-
-    return () => {
-      socket.off("sync", handleSync);
-      socket.off("documentUpdated", handleDocumentUpdate);
-      if (unbindEditor) unbindEditor();
-      ydoc.destroy();
-      ydocRef.current = null;
-      yTextRef.current = null;
-      undoManagerRef.current = null;
-    };
-  }, [groupId, socket, bindEditorToYjs]);
-
-   useEffect(() => {
-   if (!ydocRef.current || !socket || !groupId) return;
-
-   const observer = (update) => {
-     socket.emit("updateDocument", Array.from(update));
-   };
-   ydocRef.current.on("update", observer);
-
-   return () => {
-     if (ydocRef.current) ydocRef.current.off("update", observer);
-   };
- }, [socket, groupId]);
+    fetchInitialCode();
+  }, [language, groupId, bindEditorToYjs]); // Re-runs when language changes
 
 
-
-  const fetchCodeGroup = async (lang) => {
-  try {
-    const res = await axios.post(
-      `${BACKEND_URL}/getCodeGroup`,
-      { language: lang, groupId },
-      { withCredentials: true }
-    );
-
-    const data = res.data;
-    const initialCode = data.code || "// Write your code here";
-
-    // Update local state
-    setCodes((prev) => ({ ...prev, [lang]: initialCode }));
-
-    // ALSO update Yjs text
-    if (yTextRef.current && yTextRef.current.toString() === "") {
-      yTextRef.current.insert(0, initialCode);
-    }
-
-  } catch (err) {
-    console.error("Failed to fetch code", err);
-  }
-};
-
-
-  useEffect(() => {
-    if (language) {
-      fetchCodeGroup(language);
-    }
-  }, [language]);
-
-  // Modify your existing useEffect for previous messages
+  // Chat-related useEffects
   useEffect(() => {
     if (!socket || !groupId) return;
-  
     socket.emit("joinGroup", groupId);
-  
-    socket.on("previousMessages", (msgs) => {
-      setMessages(msgs);
-      setTimeout(() => {
-        if (chatEndRef.current) {
-          chatEndRef.current.scrollIntoView({ behavior: "auto" });
-        }
-      }, 100); // Small timeout to ensure DOM updates
-    });
-  
-    socket.on("newMessage", (message) => {
-      setMessages((prev) => [...prev, message]);
-      console.log("Message received");
-    });
+    
+    const handlePreviousMessages = (msgs) => setMessages(msgs);
+    const handleNewMessage = (msg) => setMessages((prev) => [...prev, msg]);
+    const handleOnlineUsers = (users) => setOnlineUsers(users);
 
-    socket.on("getOnlineUsers", (users) => {
-      console.log("Online users:", users);
-      setOnlineUsers(users); // users is an array of userIds
-    });
+    socket.on("previousMessages", handlePreviousMessages);
+    socket.on("newMessage", handleNewMessage);
+    socket.on("getOnlineUsers", handleOnlineUsers);
   
     return () => {
       socket.emit("leaveGroup", groupId);
-      socket.off("previousMessages");
-      socket.off("newMessage");
+      socket.off("previousMessages", handlePreviousMessages);
+      socket.off("newMessage", handleNewMessage);
+      socket.off("getOnlineUsers", handleOnlineUsers);
     };
   }, [socket, groupId]);
   
-  // Scroll to bottom on message update
   useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const sendMessage = () => {
     if (message.trim() === "") return;
-
-    socket.emit("sendMessage", {
-      username: username,
-      groupId,
-      messageContent: message,
-      userId,
-    });
-
+    socket.emit("sendMessage", { username, groupId, messageContent: message, userId });
     setMessage("");
   };
 
-  const debounce = (func, delay) => {
-      let timer;
-      return (...args) => {
-        clearTimeout(timer);
-        timer = setTimeout(() => func(...args), delay);
-      };
-    };
-  
-    const saveCodeToBackend = useCallback(
-      debounce(async (lang, code) => {
-        try {
-          await axios.post(
-            `${BACKEND_URL}/saveCodeGroup`,
-            { language: lang, code, groupId },
-            { withCredentials: true }
-          );
-          console.log("Code saved");
-        } catch (err) {
-          console.error("Failed to save code", err);
-        }
-      }, 1000),
-      []
-    );
-
   const handleCompile = async () => {
+    if (!yTextRef.current) return;
+    setOutput("Compiling...");
     try {
-      const res = await axios.post(`${BACKEND_URL}/compile`, {
-        code: codes[language] || "",
+      const res = await axios.post("http://localhost:8000/compile", {
+        code: yTextRef.current.toString(), // Get code from the single source of truth
         language,
         input,
       });
-      console.log(res);
-
       setOutput(res.data.output || res.data.error);
     } catch (err) {
-      // have to handle the time limit excedded properly
-      if (err.response || err.response.data || err.response.data.error) {
-        setOutput(err.response.data.error);
-      } else {
-        setOutput("An unknown error occurred.");
-      }
+      setOutput(err.response?.data?.error || "An unknown error occurred.");
     }
   };
 
-  // Handle key bindings for undo/redo
   const handleEditorKeyDown = (event) => {
-    // Handle Ctrl+Z for undo
-    if (event.ctrlKey && event.key === 'z' && !event.shiftKey && undoManagerRef.current) {
+    if (!undoManagerRef.current) return;
+    if (event.ctrlKey && event.key === 'z' && !event.shiftKey) {
+      event.preventDefault();
       undoManagerRef.current.undo();
-      event.preventDefault();
     }
-    // Handle Ctrl+Shift+Z or Ctrl+Y for redo
-    if ((event.ctrlKey && event.shiftKey && event.key === 'z') || 
-        (event.ctrlKey && event.key === 'y')) {
-      undoManagerRef.current.redo();
+    if ((event.ctrlKey && event.key === 'y') || (event.ctrlKey && event.shiftKey && event.key === 'z')) {
       event.preventDefault();
+      undoManagerRef.current.redo();
     }
   };
 
   return (
     <div className="flex h-screen bg-black text-white font-mono relative">
-      {/* Group Info Drawer (Slide-In) */}
       {showGroupInfo && <GroupInfo groupId={groupId} userId={userId} setShowGroupInfo={setShowGroupInfo} onlineUsers={onlineUsers} />}
 
       {/* Chat Sidebar */}
@@ -330,9 +284,8 @@ export default function GroupPage() {
                   isOwnMessage ? "self-end items-end" : "items-start"
                 }`}
               >
-                {/* Sender Name */}
                 <span className="text-[10px] text-neutral-400 mb-0.5">
-                  {isOwnMessage ? username : msg.senderrname}
+                  {isOwnMessage ? "You" : msg.sendername}
                 </span>
 
                 <div
@@ -340,7 +293,6 @@ export default function GroupPage() {
                     isOwnMessage ? "flex-row-reverse" : ""
                   }`}
                 >
-                  {/* Avatar Circle */}
                   <div
                     className={`h-6 w-6 rounded-full ${
                       isOwnMessage ? "bg-red-600 ml-2" : "bg-blue-600 mr-2"
@@ -349,7 +301,6 @@ export default function GroupPage() {
                     {msg.sendername ? msg.sendername[0].toUpperCase() : 'U'}
                   </div>
 
-                  {/* Message Bubble with Timestamp */}
                   <div
                     className={`px-3 py-2 rounded-lg text-xs shadow-sm relative ${
                       isOwnMessage
@@ -369,14 +320,12 @@ export default function GroupPage() {
                       }`}
                     >
                       {time}
-                      
                     </div>
                   </div>
                 </div>
               </div>
             );
           })}
-          {/* Auto-scroll anchor */}
           <div ref={chatEndRef} />
         </div>
 
@@ -387,15 +336,9 @@ export default function GroupPage() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  if (e.shiftKey) {
-                    // Shift+Enter → insert newline
-                    return;
-                  } else {
-                    // Enter → send message
+                if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
                     sendMessage();
-                  }
                 }
               }}
               placeholder="Type a message..."
@@ -406,12 +349,7 @@ export default function GroupPage() {
               onClick={sendMessage}
               className="absolute right-2 top-1.5 text-red-500 hover:text-red-400"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4"
-                fill="currentColor"
-                viewBox="0 0 20 20"
-              >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
               </svg>
             </button>
@@ -434,24 +372,12 @@ export default function GroupPage() {
               <option value="javascript">JavaScript</option>
             </select>
             <button
-              onClick={() => {
-                setOutput("Compiling your code...");
-                handleCompile();
-              }}
+              onClick={handleCompile}
               className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm shadow-md flex items-center"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-4 w-4 mr-1"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
-                  clipRule="evenodd"
-                />
-              </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/>
+                </svg>
               Compile & Run
             </button>
           </div>
@@ -462,7 +388,7 @@ export default function GroupPage() {
             </div>
           </div>
         </div>
-
+        
         {/* Code Editor */}
         <div 
           className="flex-1 border border-neutral-700 rounded-xl overflow-hidden shadow-md"
@@ -471,12 +397,6 @@ export default function GroupPage() {
           <Editor
             height="100%"
             language={language}
-            value={codes[language] || ""}
-              onChange={(val) => {
-                const updatedCode = val || "";
-                setCodes((prev) => ({ ...prev, [language]: updatedCode }));
-                saveCodeToBackend(language, updatedCode);
-              }}
             onMount={handleEditorDidMount}
             theme="vs-dark"
             options={{
@@ -486,7 +406,7 @@ export default function GroupPage() {
             }}
           />
         </div>
-
+        
         {/* Output/Input Area */}
         <div className="flex gap-4">
           <div className="w-[70%] bg-neutral-900 rounded-lg border border-neutral-700 text-sm h-40 overflow-auto shadow-sm flex flex-col">
