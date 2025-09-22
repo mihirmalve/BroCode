@@ -81,23 +81,27 @@ export default function GroupPage() {
 
   useEffect(() => {
     if (!groupId || !socket) return;
-
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
 
     const handleDocSync = (docState) => {
-      console.log("Applying full document sync from server...");
+      // LOG 4 (INITIAL LOAD)
+      console.log("✅ FRONTEND: Received 'document-sync' from server. Applying initial state.");
       Y.applyUpdate(ydoc, new Uint8Array(docState), 'remote');
     };
     socket.on("document-sync", handleDocSync);
 
     const handleDocUpdate = (update) => {
+      // LOG 4 (REAL-TIME)
+      console.log("✅ FRONTEND (Receiver): Received 'document-update' from server.");
       Y.applyUpdate(ydoc, new Uint8Array(update), 'remote');
     };
     socket.on("document-update", handleDocUpdate);
 
     const observer = (update, origin) => {
       if (origin !== 'remote') {
+        // LOG 1
+        console.log("➡️ FRONTEND (Sender): Emitting 'document-change' to server.");
         socket.emit("document-change", { groupId, update: Array.from(update) });
       }
     };
@@ -112,7 +116,6 @@ export default function GroupPage() {
       }
     };
   }, [groupId, socket]);
-
  
   useEffect(() => {
     if (!ydocRef.current || !editorRef.current) return;
