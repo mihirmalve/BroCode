@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import axios from "axios";
+import api from '../services/api'; // <-- IMPORT THE NEW API SERVICE
 import SocketContext from "../context/socketContext";
 import * as Y from 'yjs';
 import GroupInfo from "./GroupInfo";
@@ -21,7 +21,6 @@ export default function GroupPage() {
   const { socket } = React.useContext(SocketContext);
   const navigate = useNavigate();
   
-  // State for UI elements, not for the editor's content
   const [output, setOutput] = useState("");
   const [language, setLanguage] = useState("cpp");
   const [input, setInput] = useState("");
@@ -30,13 +29,12 @@ export default function GroupPage() {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
 
-  // Refs for managing Yjs, Monaco, and bindings
   const editorRef = useRef(null);
   const ydocRef = useRef(null);
-  const yTextRef = useRef(null); // Will now point to the Y.Text for the current language
+  const yTextRef = useRef(null);
   const undoManagerRef = useRef(null);
   const chatEndRef = useRef(null);
-  const unbindEditorRef = useRef(null); // Ref to store the editor binding cleanup function
+  const unbindEditorRef = useRef(null);
 
   const userId = localStorage.getItem("user-data")
     ? JSON.parse(localStorage.getItem("user-data"))._id
@@ -47,15 +45,12 @@ export default function GroupPage() {
 
   const { groupId } = useParams();
 
-  // useCallback to memoize the binding function
   const bindEditorToYjs = useCallback((editor, yText) => {
     if (!editor || !yText) return;
     const model = editor.getModel();
     model.setValue(yText.toString());
-
     let updatingFromYjs = false;
 
-    // Yjs changes -> Editor
     const yjsObserver = () => {
       updatingFromYjs = true;
       const yContent = yText.toString();
@@ -70,7 +65,6 @@ export default function GroupPage() {
     };
     yText.observe(yjsObserver);
 
-    // Editor changes -> Yjs
     const editorListener = editor.onDidChangeModelContent(() => {
       if (updatingFromYjs) return;
       const value = editor.getValue();
@@ -82,27 +76,25 @@ export default function GroupPage() {
       }
     });
 
-    // Return a cleanup function
     return () => {
       editorListener.dispose();
       yText.unobserve(yjsObserver);
     };
   }, []);
 
-  // Function to handle mounting of the Monaco Editor
   const handleEditorDidMount = (editor) => {
     editorRef.current = editor;
   };
 
-  // Debounced save function, memoized with useCallback
   const saveCodeToBackend = useCallback(
     debounce(async (lang, code) => {
       try {
-        await axios.post(
-          "http://localhost:8000/saveCodeGroup",
-          { language: lang, code, groupId },
-          { withCredentials: true }
-        );
+        // Use the 'api' instance. No need for full URL or 'withCredentials'.
+        await api.post('/saveCodeGroup', {
+          language: lang,
+          code,
+          groupId,
+        });
         console.log(`Code for ${lang} saved to backend.`);
       } catch (err) {
         console.error("Failed to save code", err);
@@ -111,18 +103,14 @@ export default function GroupPage() {
     [groupId]
   );
 
-  // Main useEffect to set up Yjs document and socket listeners (runs only once)
   useEffect(() => {
     if (!groupId || !socket) return;
-    
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
-
     const handleDocumentUpdate = (update) => {
       Y.applyUpdate(ydoc, new Uint8Array(update), 'remote');
     };
     socket.on("documentUpdated", handleDocumentUpdate);
-
     return () => {
       socket.off("documentUpdated", handleDocumentUpdate);
       if (ydocRef.current) {
@@ -131,10 +119,8 @@ export default function GroupPage() {
     };
   }, [groupId, socket]);
 
-  // Second useEffect to handle LOCAL changes (typing) and saving
   useEffect(() => {
     if (!ydocRef.current) return;
-
     const observer = (update, origin) => {
       if (origin !== 'remote') {
         socket.emit("updateDocument", Array.from(update));
@@ -143,9 +129,7 @@ export default function GroupPage() {
         }
       }
     };
-
     ydocRef.current.on("update", observer);
-
     return () => {
       if (ydocRef.current) {
         ydocRef.current.off("update", observer);
@@ -153,29 +137,23 @@ export default function GroupPage() {
     };
   }, [language, saveCodeToBackend, socket]);
 
-  // useEffect to handle language switching
   useEffect(() => {
     if (!ydocRef.current || !editorRef.current) return;
-
     if (unbindEditorRef.current) {
       unbindEditorRef.current();
     }
-    
     const yText = ydocRef.current.getText(language);
     yTextRef.current = yText;
-
     undoManagerRef.current = new Y.UndoManager(yText);
-    
     unbindEditorRef.current = bindEditorToYjs(editorRef.current, yText);
-
     const fetchInitialCode = async () => {
       if (yText.toString() === "") {
         try {
-          const res = await axios.post(
-            "http://localhost:8000/getCodeGroup",
-            { language, groupId },
-            { withCredentials: true }
-          );
+          // Use the 'api' instance. Just provide the endpoint.
+          const res = await api.post('/getCodeGroup', {
+            language,
+            groupId,
+          });
           const initialCode = res.data.code || `// Write your ${language} code here`;
           yText.insert(0, initialCode);
         } catch (err) {
@@ -183,24 +161,18 @@ export default function GroupPage() {
         }
       }
     };
-
     fetchInitialCode();
   }, [language, groupId, bindEditorToYjs]);
 
-
-  // Chat-related useEffects
   useEffect(() => {
     if (!socket || !groupId) return;
     socket.emit("joinGroup", groupId);
-    
     const handlePreviousMessages = (msgs) => setMessages(msgs);
     const handleNewMessage = (msg) => setMessages((prev) => [...prev, msg]);
     const handleOnlineUsers = (users) => setOnlineUsers(users);
-
     socket.on("previousMessages", handlePreviousMessages);
     socket.on("newMessage", handleNewMessage);
     socket.on("getOnlineUsers", handleOnlineUsers);
-  
     return () => {
       socket.emit("leaveGroup", groupId);
       socket.off("previousMessages", handlePreviousMessages);
@@ -208,7 +180,7 @@ export default function GroupPage() {
       socket.off("getOnlineUsers", handleOnlineUsers);
     };
   }, [socket, groupId]);
-  
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -223,7 +195,8 @@ export default function GroupPage() {
     if (!yTextRef.current) return;
     setOutput("Compiling...");
     try {
-      const res = await axios.post("http://localhost:8000/compile", {
+      // Use the 'api' instance.
+      const res = await api.post('/compile', {
         code: yTextRef.current.toString(),
         language,
         input,
@@ -245,6 +218,7 @@ export default function GroupPage() {
       undoManagerRef.current.redo();
     }
   };
+
 
   return (
     <div className="flex h-screen bg-black text-white font-mono relative">
