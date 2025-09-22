@@ -1,7 +1,8 @@
 import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import api from '../services/api'; // <-- IMPORT THE NEW API SERVICE
+import axios from "axios";
+import { BACKEND_URL } from './GlobalVariable'; // <-- THE ONLY CHANGE NEEDED
 import SocketContext from "../context/socketContext";
 import * as Y from 'yjs';
 import GroupInfo from "./GroupInfo";
@@ -89,12 +90,11 @@ export default function GroupPage() {
   const saveCodeToBackend = useCallback(
     debounce(async (lang, code) => {
       try {
-        // Use the 'api' instance. No need for full URL or 'withCredentials'.
-        await api.post('/saveCodeGroup', {
-          language: lang,
-          code,
-          groupId,
-        });
+        await axios.post(
+          `${BACKEND_URL}/saveCodeGroup`, // Uses the imported variable
+          { language: lang, code, groupId },
+          { withCredentials: true }
+        );
         console.log(`Code for ${lang} saved to backend.`);
       } catch (err) {
         console.error("Failed to save code", err);
@@ -149,11 +149,11 @@ export default function GroupPage() {
     const fetchInitialCode = async () => {
       if (yText.toString() === "") {
         try {
-          // Use the 'api' instance. Just provide the endpoint.
-          const res = await api.post('/getCodeGroup', {
-            language,
-            groupId,
-          });
+          const res = await axios.post(
+            `${BACKEND_URL}/getCodeGroup`, // Uses the imported variable
+            { language, groupId },
+            { withCredentials: true }
+          );
           const initialCode = res.data.code || `// Write your ${language} code here`;
           yText.insert(0, initialCode);
         } catch (err) {
@@ -195,12 +195,15 @@ export default function GroupPage() {
     if (!yTextRef.current) return;
     setOutput("Compiling...");
     try {
-      // Use the 'api' instance.
-      const res = await api.post('/compile', {
+      const res = await axios.post(
+        `${BACKEND_URL}/compile`, // Uses the imported variable
+        {
         code: yTextRef.current.toString(),
         language,
         input,
-      });
+      },
+      { withCredentials: true }
+      );
       setOutput(res.data.output || res.data.error);
     } catch (err) {
       setOutput(err.response?.data?.error || "An unknown error occurred.");
