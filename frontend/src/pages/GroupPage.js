@@ -92,7 +92,6 @@ export default function GroupPage() {
   // Function to handle mounting of the Monaco Editor
   const handleEditorDidMount = (editor) => {
     editorRef.current = editor;
-    // The binding logic is now handled in the useEffect that watches `language`
   };
 
   // Debounced save function, memoized with useCallback
@@ -112,7 +111,7 @@ export default function GroupPage() {
     [groupId]
   );
 
-  // Main useEffect to set up Yjs and socket listeners (runs once, but depends on language for saving)
+  // Main useEffect to set up Yjs document and socket listeners (runs only once)
   useEffect(() => {
     if (!groupId || !socket) return;
     
@@ -122,48 +121,53 @@ export default function GroupPage() {
     const handleDocumentUpdate = (update) => {
       Y.applyUpdate(ydoc, new Uint8Array(update), 'remote');
     };
-
     socket.on("documentUpdated", handleDocumentUpdate);
 
-    // This observer handles broadcasting local changes and saving them.
+    return () => {
+      socket.off("documentUpdated", handleDocumentUpdate);
+      if (ydocRef.current) {
+        ydocRef.current.destroy();
+      }
+    };
+  }, [groupId, socket]);
+
+  // Second useEffect to handle LOCAL changes (typing) and saving
+  useEffect(() => {
+    if (!ydocRef.current) return;
+
     const observer = (update, origin) => {
       if (origin !== 'remote') {
-        // This is a local change, so broadcast and save.
         socket.emit("updateDocument", Array.from(update));
         if (yTextRef.current) {
           saveCodeToBackend(language, yTextRef.current.toString());
         }
       }
     };
-    ydoc.on("update", observer);
+
+    ydocRef.current.on("update", observer);
 
     return () => {
-      socket.off("documentUpdated", handleDocumentUpdate);
-      ydoc.off("update", observer);
-      ydoc.destroy();
+      if (ydocRef.current) {
+        ydocRef.current.off("update", observer);
+      }
     };
-  }, [groupId, socket, language, saveCodeToBackend]);
+  }, [language, saveCodeToBackend, socket]);
 
   // useEffect to handle language switching
   useEffect(() => {
     if (!ydocRef.current || !editorRef.current) return;
 
-    // 1. Clean up any existing editor binding
     if (unbindEditorRef.current) {
       unbindEditorRef.current();
     }
     
-    // 2. Get the Y.Text for the selected language. This creates it if it doesn't exist.
     const yText = ydocRef.current.getText(language);
     yTextRef.current = yText;
 
-    // 3. Set up the undo manager for the current Y.Text
     undoManagerRef.current = new Y.UndoManager(yText);
     
-    // 4. Bind the editor to the new Y.Text and store the cleanup function
     unbindEditorRef.current = bindEditorToYjs(editorRef.current, yText);
 
-    // 5. Fetch initial code from the backend ONLY if this language's doc is empty
     const fetchInitialCode = async () => {
       if (yText.toString() === "") {
         try {
@@ -181,7 +185,7 @@ export default function GroupPage() {
     };
 
     fetchInitialCode();
-  }, [language, groupId, bindEditorToYjs]); // Re-runs when language changes
+  }, [language, groupId, bindEditorToYjs]);
 
 
   // Chat-related useEffects
@@ -220,7 +224,7 @@ export default function GroupPage() {
     setOutput("Compiling...");
     try {
       const res = await axios.post("http://localhost:8000/compile", {
-        code: yTextRef.current.toString(), // Get code from the single source of truth
+        code: yTextRef.current.toString(),
         language,
         input,
       });
@@ -246,7 +250,6 @@ export default function GroupPage() {
     <div className="flex h-screen bg-black text-white font-mono relative">
       {showGroupInfo && <GroupInfo groupId={groupId} userId={userId} setShowGroupInfo={setShowGroupInfo} onlineUsers={onlineUsers} />}
 
-      {/* Chat Sidebar */}
       <div className="w-[25%] border-r border-neutral-800 bg-neutral-950 flex flex-col shadow-lg transition-colors duration-200">
         <div className="p-3 border-b border-neutral-800 bg-neutral-900 flex items-center justify-between">
           <button
@@ -263,7 +266,6 @@ export default function GroupPage() {
           </button>
         </div>
 
-        {/* Chat Messages */}
         <div className="flex-1 p-3 space-y-2 overflow-y-auto scrollbar-thin scrollbar-thumb-red-700 scrollbar-track-transparent">
           <div className="text-center my-2">
             <span className="text-xs text-neutral-500 bg-neutral-900 px-2 py-0.5 rounded">
@@ -329,7 +331,6 @@ export default function GroupPage() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Chat Input */}
         <div className="p-3 border-t border-neutral-800 bg-neutral-900 transition-colors duration-200">
           <div className="relative">
             <textarea
@@ -357,9 +358,7 @@ export default function GroupPage() {
         </div>
       </div>
 
-      {/* Main Editor Area */}
       <div className="flex-1 p-4 flex flex-col space-y-3">
-        {/* Controls */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <select
@@ -389,7 +388,6 @@ export default function GroupPage() {
           </div>
         </div>
         
-        {/* Code Editor */}
         <div 
           className="flex-1 border border-neutral-700 rounded-xl overflow-hidden shadow-md"
           onKeyDown={handleEditorKeyDown}
@@ -407,7 +405,6 @@ export default function GroupPage() {
           />
         </div>
         
-        {/* Output/Input Area */}
         <div className="flex gap-4">
           <div className="w-[70%] bg-neutral-900 rounded-lg border border-neutral-700 text-sm h-40 overflow-auto shadow-sm flex flex-col">
             <div className="px-4 py-2 border-b border-neutral-700 bg-neutral-800">
