@@ -32,20 +32,20 @@ class authController {
     }
     
   async logoutHandler(req, res) {
-    try {
-      //res.cookie("jwt", "", { maxAge: 0 });
-        res.cookie("jwt", "", {
-        maxAge: 0 * 24 * 60 * 60 * 1000, // 30 days
-        httpOnly: true,
-        sameSite: "strict",
-        secure: process.env.NODE_ENV === "production"
+  try {
+    res.clearCookie("jwt", {
+      httpOnly: true,
+      sameSite: "strict",
+      secure: process.env.NODE_ENV === "production",
+      path: "/", // important: must match cookie path
     });
-      res.json({ message: "Logged out successfully" });
-    } catch (error) {
-      console.log("Error in logout controller", error.message);
-      res.json({ error: "Internal server error" });
-    }
+    res.status(200).json({ message: "Logged out successfully" });
+  } catch (error) {
+    console.error("Error in logout controller:", error.message);
+    res.status(500).json({ error: "Internal server error" });
   }
+}
+
 
   async checkUserAndEmailHandler(req, res) {
     try {
