@@ -108,9 +108,7 @@ function HomePage() {
         withCredentials: true,
       });
       localStorage.removeItem("user-data");
-      setTimeout(() => {
-        navigate("/");
-      }, 300);
+      navigate("/");
     } catch (err) {
       console.log(err);
       //setIsLoggingOut(false);

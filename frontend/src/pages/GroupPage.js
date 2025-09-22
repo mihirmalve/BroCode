@@ -130,19 +130,18 @@ export default function GroupPage() {
     };
   }, [groupId, socket, bindEditorToYjs]);
 
-  useEffect(() => {
-    if (!ydocRef.current || !socket || !groupId) return;
+   useEffect(() => {
+   if (!ydocRef.current || !socket || !groupId) return;
 
-    const observer = () => {
-      const update = Y.encodeStateAsUpdate(ydocRef.current);
-      socket.emit("updateDocument", Array.from(update));
-    };
-    ydocRef.current.on("update", observer);
+   const observer = (update) => {
+     socket.emit("updateDocument", Array.from(update));
+   };
+   ydocRef.current.on("update", observer);
 
-    return () => {
-      if (ydocRef.current) ydocRef.current.off("update", observer);
-    };
-  }, [socket, groupId]);
+   return () => {
+     if (ydocRef.current) ydocRef.current.off("update", observer);
+   };
+ }, [socket, groupId]);
 
 
 
