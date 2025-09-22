@@ -100,26 +100,45 @@ io.on("connection", (socket) => {
     }
   });
 
- 
+  // RENAMED: from `updateDocument` to `document-change` to match frontend
   socket.on("document-change", ({ groupId, update }) => {
-    // LOG 2
-    console.log(`➡️ BACKEND: Received 'document-change' for group: ${groupId}`);
-    
     const doc = yDocs.get(groupId);
     if (!doc) return;
-    
+
+    // Apply the update from a client
     Y.applyUpdate(doc, new Uint8Array(update));
+
+    // Broadcast the update to all OTHER clients
     socket.to(groupId).emit("document-update", update);
 
-    // LOG 3
-    console.log(`⬅️ BACKEND: Broadcasted 'document-update' to room: ${groupId}`);
-    
+    // Get or create a debounced save function for this group
     if (!saveTimers.has(groupId)) {
-      // ... debounce logic ...
+      const debouncedSave = debounce(async () => {
+        try {
+          const groupDoc = yDocs.get(groupId);
+          if (!groupDoc) return;
+
+          console.log(`SERVER: Saving code for group ${groupId}...`);
+          const languages = ['cpp', 'python', 'javascript']; // Your supported languages
+          const codePayload = [];
+
+          languages.forEach(lang => {
+            const content = groupDoc.getText(lang).toString();
+            codePayload.push({ language: lang, content: content });
+          });
+          
+          // Atomically update the entire code array in the database
+          await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
+          console.log(`SERVER: Code for group ${groupId} saved successfully.`);
+        } catch (error) {
+          console.error(`SERVER: Error saving code for group ${groupId}:`, error);
+        }
+      }, 2500); // 2.5-second delay for saving
+      
+      saveTimers.set(groupId, debouncedSave);
     }
     
-    // LOG 5
-    console.log(`⏳ BACKEND: Triggering debounced save for group: ${groupId}`);
+    // Trigger the debounced save. It will reset on every keystroke from any user.
     saveTimers.get(groupId)();
   });
 
