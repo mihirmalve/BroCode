@@ -37,7 +37,7 @@ class authController {
       httpOnly: true,
       sameSite: "strict",
       secure: process.env.NODE_ENV === "production",
-      path: "/", // important: must match cookie path
+      path: "/", 
     });
     res.status(200).json({ message: "Logged out successfully" });
   } catch (error) {
