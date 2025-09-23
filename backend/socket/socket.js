@@ -99,45 +99,45 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("document-change", ({ groupId, update }) => {
-    try {
-      const doc = yDocs.get(groupId);
-      if (!doc) return;
-      
-      Y.applyUpdate(doc, update, 'remote');
-      
-      // FIX: Use .broadcast to prevent sending the update back to the sender
-      socket.broadcast.to(groupId).emit("document-update", update);
+  // In your socket.js file
 
-      if (!saveTimers.has(groupId)) {
-        const debouncedSave = debounce(async () => {
-          try {
-            const groupDoc = yDocs.get(groupId);
-            if (!groupDoc) return;
-            
-            const languages = ['cpp', 'python', 'javascript'];
-            const codePayload = [];
-            languages.forEach(lang => {
-              const content = groupDoc.getText(lang).toString();
-              codePayload.push({ language: lang, content: content });
-            });
-            
-            // LOG: See what data we are about to save
-            console.log(`SERVER: Data to be saved for group ${groupId}:`, JSON.stringify(codePayload));
+socket.on("document-change", ({ groupId, update }) => {
+  try {
+    const doc = yDocs.get(groupId);
+    if (!doc) return;
+    
+    // 👇 BEST PRACTICE: Ensure the update is a Uint8Array before applying it.
+    Y.applyUpdate(doc, new Uint8Array(update), 'remote');
+    
+    // Broadcast to other clients in the room
+    socket.broadcast.to(groupId).emit("document-update", update);
 
-            await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
-            console.log(`SERVER: Code for group ${groupId} saved successfully.`);
-          } catch (dbError) {
-            console.error(`SERVER DB ERROR: Failed to save code for group ${groupId}:`, dbError);
-          }
-        }, 2500);
-        saveTimers.set(groupId, debouncedSave);
-      }
-      saveTimers.get(groupId)();
-    } catch (error) {
-      console.error(`SERVER RUNTIME ERROR in 'document-change':`, error);
-    }
-  });
+    // Your debounced saving logic remains the same and will now work correctly.
+    if (!saveTimers.has(groupId)) {
+      const debouncedSave = debounce(async () => {
+        try {
+          const groupDoc = yDocs.get(groupId);
+          if (!groupDoc) return;
+          
+          const languages = ['cpp', 'python', 'javascript'];
+          const codePayload = languages.map(lang => ({
+            language: lang,
+            content: groupDoc.getText(lang).toString()
+          }));
+          
+          await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
+          console.log(`SERVER: Code for group ${groupId} saved successfully.`);
+        } catch (dbError) {
+          console.error(`SERVER DB ERROR: Failed to save code for group ${groupId}:`, dbError);
+        }
+      }, 2500);
+      saveTimers.set(groupId, debouncedSave);
+    }
+    saveTimers.get(groupId)();
+  } catch (error) {
+    console.error(`SERVER RUNTIME ERROR in 'document-change':`, error);
+  }
+});
 
   socket.on("leaveGroup", (groupId) => {
     socket.leave(groupId);

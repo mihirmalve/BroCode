@@ -1,10 +1,11 @@
 import { useNavigate, useParams } from "react-router-dom";
 import Editor from "@monaco-editor/react";
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import { BACKEND_URL } from './GlobalVariable';
 import SocketContext from "../context/socketContext";
 import * as Y from 'yjs';
+import { MonacoBinding } from 'y-monaco';
 import GroupInfo from "./GroupInfo";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -12,7 +13,7 @@ import remarkGfm from "remark-gfm";
 export default function GroupPage() {
   const { socket } = React.useContext(SocketContext);
   const navigate = useNavigate();
-  
+
   const [output, setOutput] = useState("");
   const [language, setLanguage] = useState("cpp");
   const [input, setInput] = useState("");
@@ -21,83 +22,48 @@ export default function GroupPage() {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
 
+  // Refs for managing the editor, Y.js document, and the binding
   const editorRef = useRef(null);
   const ydocRef = useRef(null);
-  const yTextRef = useRef(null);
-  const undoManagerRef = useRef(null);
+  const bindingRef = useRef(null);
   const chatEndRef = useRef(null);
-  const unbindEditorRef = useRef(null);
 
   const userId = localStorage.getItem("user-data") ? JSON.parse(localStorage.getItem("user-data"))._id : null;
   const username = localStorage.getItem("user-data") ? JSON.parse(localStorage.getItem("user-data")).username : "";
   const { groupId } = useParams();
 
-  const bindEditorToYjs = useCallback((editor, yText) => {
-    if (!editor || !yText) return;
-    const model = editor.getModel();
-    model.setValue(yText.toString());
-    let updatingFromYjs = false;
-
-    // This observer pushes remote changes FROM Y.js INTO the editor
-    const yjsObserver = () => {
-      updatingFromYjs = true;
-      const yContent = yText.toString();
-      if (model.getValue() !== yContent) {
-        const currentPosition = editor.getPosition();
-        model.setValue(yContent);
-        if (currentPosition) {
-            editor.setPosition(currentPosition);
-        }
-      }
-      updatingFromYjs = false;
-    };
-    yText.observe(yjsObserver);
-
-    // This listener pushes local editor changes FROM the editor INTO Y.js
-    const editorListener = editor.onDidChangeModelContent(() => {
-      if (updatingFromYjs) return;
-      const value = editor.getValue();
-      if (yText.toString() !== value) {
-        yText.doc.transact(() => {
-          yText.delete(0, yText.length);
-          yText.insert(0, value);
-        });
-      }
-    });
-
-    return () => {
-      editorListener.dispose();
-      yText.unobserve(yjsObserver);
-    };
-  }, []);
-
+  // This function is called when the Monaco Editor is mounted
   const handleEditorDidMount = (editor) => {
     editorRef.current = editor;
   };
 
+  // Effect for setting up the WebSocket connection and Y.js document
   useEffect(() => {
     if (!groupId || !socket) return;
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
 
+    // Apply the initial document state from the server
     const handleDocSync = (docState) => {
       Y.applyUpdate(ydoc, new Uint8Array(docState), 'remote');
     };
     socket.on("document-sync", handleDocSync);
 
+    // Apply subsequent updates from other users
     const handleDocUpdate = (update) => {
       Y.applyUpdate(ydoc, new Uint8Array(update), 'remote');
     };
     socket.on("document-update", handleDocUpdate);
 
+    // When the local document changes, send the update to the server
     const observer = (update, origin) => {
       if (origin !== 'remote') {
-        // Send the raw binary update, not an Array.from() copy
         socket.emit("document-change", { groupId, update });
       }
     };
     ydoc.on("update", observer);
 
+    // Cleanup function to remove listeners and destroy the doc on unmount
     return () => {
       socket.off("document-sync", handleDocSync);
       socket.off("document-update", handleDocUpdate);
@@ -108,25 +74,44 @@ export default function GroupPage() {
     };
   }, [groupId, socket]);
 
+  // Effect for creating and managing the MonacoBinding
   useEffect(() => {
-    if (!ydocRef.current || !editorRef.current) return;
-    if (unbindEditorRef.current) unbindEditorRef.current();
-    
-    const yText = ydocRef.current.getText(language);
-    yTextRef.current = yText;
-    undoManagerRef.current = new Y.UndoManager(yText);
-    unbindEditorRef.current = bindEditorToYjs(editorRef.current, yText);
-  }, [language, bindEditorToYjs]);
+    // Wait until both the editor and Y.js document are ready
+    if (!editorRef.current || !ydocRef.current) return;
 
+    // If a binding already exists (e.g., from a language change), destroy it first
+    if (bindingRef.current) {
+      bindingRef.current.destroy();
+    }
+
+    // Get the Y.js shared text type for the current language
+    const yText = ydocRef.current.getText(language);
+    
+    // Get the Monaco editor's text model (the content it displays)
+    const editorModel = editorRef.current.getModel();
+
+    // Create the MonacoBinding, which syncs the yText and editorModel
+    bindingRef.current = new MonacoBinding(
+      yText,
+      editorModel,
+      new Set([editorRef.current])
+    );
+
+  // This effect re-runs whenever the 'language' state changes, creating a new binding
+  }, [language]);
+
+  // Effect for handling group chat and online users
   useEffect(() => {
     if (!socket || !groupId) return;
     socket.emit("joinGroup", groupId);
     const handlePreviousMessages = (msgs) => setMessages(msgs);
     const handleNewMessage = (msg) => setMessages((prev) => [...prev, msg]);
     const handleOnlineUsers = (users) => setOnlineUsers(users);
+
     socket.on("previousMessages", handlePreviousMessages);
     socket.on("newMessage", handleNewMessage);
     socket.on("getOnlineUsers", handleOnlineUsers);
+
     return () => {
       socket.emit("leaveGroup", groupId);
       socket.off("previousMessages", handlePreviousMessages);
@@ -135,6 +120,7 @@ export default function GroupPage() {
     };
   }, [socket, groupId]);
 
+  // Effect to auto-scroll the chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -146,33 +132,19 @@ export default function GroupPage() {
   };
 
   const handleCompile = async () => {
-    if (!yTextRef.current) return;
+    if (!ydocRef.current) return;
     setOutput("Compiling...");
     try {
+      // Get the current code directly from the synced Y.js document
+      const codeToCompile = ydocRef.current.getText(language).toString();
       const res = await axios.post(
         `${BACKEND_URL}/compile`,
-        {
-          code: yTextRef.current.toString(),
-          language,
-          input,
-        },
+        { code: codeToCompile, language, input, },
         { withCredentials: true }
       );
       setOutput(res.data.output || res.data.error);
     } catch (err) {
       setOutput(err.response?.data?.error || "An unknown error occurred.");
-    }
-  };
-
-  const handleEditorKeyDown = (event) => {
-    if (!undoManagerRef.current) return;
-    if (event.ctrlKey && event.key === 'z' && !event.shiftKey) {
-      event.preventDefault();
-      undoManagerRef.current.undo();
-    }
-    if ((event.ctrlKey && event.key === 'y') || (event.ctrlKey && event.shiftKey && event.key === 'z')) {
-      event.preventDefault();
-      undoManagerRef.current.redo();
     }
   };
 
@@ -249,8 +221,14 @@ export default function GroupPage() {
             </div>
           </div>
         </div>
-        <div className="flex-1 border border-neutral-700 rounded-xl overflow-hidden shadow-md" onKeyDown={handleEditorKeyDown}>
-          <Editor height="100%" language={language} onMount={handleEditorDidMount} theme="vs-dark" options={{ fontSize: 14, minimap: { enabled: false }, wordWrap: "on" }} />
+        <div className="flex-1 border border-neutral-700 rounded-xl overflow-hidden shadow-md">
+          <Editor
+            height="100%"
+            language={language}
+            onMount={handleEditorDidMount}
+            theme="vs-dark"
+            options={{ fontSize: 14, minimap: { enabled: false }, wordWrap: "on" }}
+          />
         </div>
         <div className="flex gap-4">
           <div className="w-[70%] bg-neutral-900 rounded-lg border border-neutral-700 text-sm h-40 overflow-auto shadow-sm flex flex-col">
