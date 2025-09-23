@@ -116,19 +116,27 @@ io.on("connection", (socket) => {
 
       if (!saveTimers.has(groupId)) {
         const debouncedSave = debounce(async () => {
+          // Inside the debouncedSave function in socket.js
+
           try {
+            // 1. Get the latest code from the fast, in-memory yDoc
             const groupDoc = yDocs.get(groupId);
             if (!groupDoc) return;
-            const languages = ["cpp", "python", "javascript"]; // In socket.js (This code is correct and does not need changes)
-            const codePayload = languages.map((lang) => ({
-              language: lang,
-              content: groupDoc.getText(lang).toString(),
-            }));
 
-            // This will now match the updated schema
-            await groupModel.findByIdAndUpdate(groupId, {
-              $set: { code: codePayload },
+            const languages = ["cpp", "python", "javascript"];
+
+            // 2. Build an OBJECT (Map) instead of an Array
+            const codePayload = {}; // Start with an empty object
+            languages.forEach((lang) => {
+              const content = groupDoc.getText(lang).toString();
+              codePayload[lang] = content; // Set key-value pair, e.g., codePayload['cpp'] = "..."
             });
+
+            // 3. Save the new object to the CORRECT field name: "codes"
+            await groupModel.findByIdAndUpdate(groupId, {
+              $set: { codes: codePayload }, // Use "codes" (plural) here
+            });
+
             console.log(
               `SERVER: Code for group ${groupId} saved successfully.`
             );
@@ -138,7 +146,7 @@ io.on("connection", (socket) => {
               dbError
             );
           }
-        }, 2500);
+        }, 1500);
         saveTimers.set(groupId, debouncedSave);
       }
       saveTimers.get(groupId)();
