@@ -36,7 +36,6 @@ const userSocketMap = {};
 const yDocs = new Map();
 const saveTimers = new Map();
 
-// THIS IS THE FUNCTION THAT WAS MISSING FROM YOUR DEPLOY
 const getReceiverSocketId = (receiverId) => {
   return userSocketMap[receiverId];
 };
@@ -77,16 +76,19 @@ io.on("connection", (socket) => {
 
         const groupData = await groupModel.findById(groupId);
         if (groupData && groupData.code) {
+          // LOG: See what data is being loaded from the database
+          console.log(`SERVER: Data loaded from DB for group ${groupId}:`, JSON.stringify(groupData.code));
+          
           groupData.code.forEach(langData => {
             doc.getText(langData.language).insert(0, langData.content);
           });
         }
       }
-
+      
       const doc = yDocs.get(groupId);
       const docState = Y.encodeStateAsUpdate(doc);
       socket.emit("document-sync", docState);
-
+      
       const group = await groupModel.findById(groupId).populate("messages");
       if (group) {
         socket.emit("previousMessages", group.messages);
@@ -103,20 +105,26 @@ io.on("connection", (socket) => {
       if (!doc) return;
       
       Y.applyUpdate(doc, update, 'remote');
-      socket.to(groupId).emit("document-update", update);
+      
+      // FIX: Use .broadcast to prevent sending the update back to the sender
+      socket.broadcast.to(groupId).emit("document-update", update);
 
       if (!saveTimers.has(groupId)) {
         const debouncedSave = debounce(async () => {
           try {
             const groupDoc = yDocs.get(groupId);
             if (!groupDoc) return;
-            console.log(`SERVER: Saving code for group ${groupId}...`);
+            
             const languages = ['cpp', 'python', 'javascript'];
             const codePayload = [];
             languages.forEach(lang => {
               const content = groupDoc.getText(lang).toString();
               codePayload.push({ language: lang, content: content });
             });
+            
+            // LOG: See what data we are about to save
+            console.log(`SERVER: Data to be saved for group ${groupId}:`, JSON.stringify(codePayload));
+
             await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
             console.log(`SERVER: Code for group ${groupId} saved successfully.`);
           } catch (dbError) {
