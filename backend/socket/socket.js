@@ -8,7 +8,6 @@ import * as Y from "yjs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import mongoose from "mongoose";
 
-// A simple, self-contained debounce function. No new library is needed.
 const debounce = (func, delay) => {
   let timeoutId;
   return (...args) => {
@@ -21,51 +20,38 @@ const debounce = (func, delay) => {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
 const app = express();
 const server = http.createServer(app);
-
 const io = new Server(server, {
   cors: {
-    origin: "https://b2code.netlify.app",
+    origin: [
+      "https://b2code.netlify.app",
+      "http://localhost:3000"    
+    ],
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
-
 const userSocketMap = {};
-const yDocs = new Map(); // Store Yjs documents for each group
-const saveTimers = new Map(); // Store save timers for each group
-
-const getReceiverSocketId = (receiverId) => {
-  return userSocketMap[receiverId];
-};
+const yDocs = new Map();
+const saveTimers = new Map();
 
 io.on("connection", (socket) => {
   const cookieHeader = socket.handshake.headers.cookie;
-
   if (!cookieHeader) {
-    console.log("❌ No cookies, disconnecting socket:", socket.id);
     socket.disconnect();
     return;
   }
-
   const parsedCookies = cookie.parse(cookieHeader);
   const jwt = parsedCookies.jwt;
-
   if (!jwt) {
-    console.log("❌ JWT token not found in cookies, disconnecting socket:", socket.id);
     socket.disconnect();
     return;
   }
-
-  console.log("a user connected", socket.id);
-
   const userId = socket.handshake.query.userId;
   if (userId != "undefined") {
     userSocketMap[userId] = socket.id;
   }
-
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
   socket.on("joinGroup", async (groupId) => {
@@ -75,7 +61,6 @@ io.on("connection", (socket) => {
         const doc = new Y.Doc();
         yDocs.set(groupId, doc);
 
-        console.log(`First user in group ${groupId}, loading from DB...`);
         const groupData = await groupModel.findById(groupId);
         if (groupData && groupData.code) {
           groupData.code.forEach(langData => {
@@ -84,62 +69,55 @@ io.on("connection", (socket) => {
         }
       }
 
-      // Send the full current state of the document to the newly joined user
       const doc = yDocs.get(groupId);
       const docState = Y.encodeStateAsUpdate(doc);
-      socket.emit("document-sync", Array.from(docState));
+      // Send the raw binary state
+      socket.emit("document-sync", docState);
 
-      // Send chat messages
       const group = await groupModel.findById(groupId).populate("messages");
       if (group) {
         socket.emit("previousMessages", group.messages);
       }
     } catch (error) {
       console.error("Error in joinGroup:", error);
-      socket.emit("error", { message: error.message });
     }
   });
 
-  // RENAMED: from `updateDocument` to `document-change` to match frontend
   socket.on("document-change", ({ groupId, update }) => {
-    const doc = yDocs.get(groupId);
-    if (!doc) return;
-
-    // Apply the update from a client
-    Y.applyUpdate(doc, new Uint8Array(update));
-
-    // Broadcast the update to all OTHER clients
-    socket.to(groupId).emit("document-update", update);
-
-    // Get or create a debounced save function for this group
-    if (!saveTimers.has(groupId)) {
-      const debouncedSave = debounce(async () => {
-        try {
-          const groupDoc = yDocs.get(groupId);
-          if (!groupDoc) return;
-
-          console.log(`SERVER: Saving code for group ${groupId}...`);
-          const languages = ['cpp', 'python', 'javascript']; // Your supported languages
-          const codePayload = [];
-
-          languages.forEach(lang => {
-            const content = groupDoc.getText(lang).toString();
-            codePayload.push({ language: lang, content: content });
-          });
-          
-          // Atomically update the entire code array in the database
-          await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
-          console.log(`SERVER: Code for group ${groupId} saved successfully.`);
-        } catch (error) {
-          console.error(`SERVER: Error saving code for group ${groupId}:`, error);
-        }
-      }, 2500); // 2.5-second delay for saving
+    try {
+      const doc = yDocs.get(groupId);
+      if (!doc) return;
       
-      saveTimers.set(groupId, debouncedSave);
+      // Apply the raw binary update with 'remote' origin
+      Y.applyUpdate(doc, update, 'remote');
+      
+      // Broadcast the raw binary update
+      socket.to(groupId).emit("document-update", update);
+
+      if (!saveTimers.has(groupId)) {
+        const debouncedSave = debounce(async () => {
+          try {
+            const groupDoc = yDocs.get(groupId);
+            if (!groupDoc) return;
+            console.log(`SERVER: Saving code for group ${groupId}...`);
+            const languages = ['cpp', 'python', 'javascript'];
+            const codePayload = [];
+            languages.forEach(lang => {
+              const content = groupDoc.getText(lang).toString();
+              codePayload.push({ language: lang, content: content });
+            });
+            await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
+            console.log(`SERVER: Code for group ${groupId} saved successfully.`);
+          } catch (dbError) {
+            console.error(`SERVER DB ERROR: Failed to save code for group ${groupId}:`, dbError);
+          }
+        }, 2500);
+        saveTimers.set(groupId, debouncedSave);
+      }
+      saveTimers.get(groupId)();
+    } catch (error) {
+      console.error(`SERVER RUNTIME ERROR in 'document-change':`, error);
     }
-    
-    // Trigger the debounced save. It will reset on every keystroke from any user.
-    saveTimers.get(groupId)();
   });
 
   socket.on("leaveGroup", (groupId) => {
@@ -205,19 +183,14 @@ const cleanupUnusedDocs = () => {
   for (const groupId in yDocs) {
     const room = io.sockets.adapter.rooms.get(groupId);
     if (!room || room.size === 0) {
-      console.log(`Cleaning up unused Yjs document for group ${groupId}`);
-      // Important to also clear the timer to prevent memory leaks
       const timer = saveTimers.get(groupId);
       if (timer) {
-          // If your debounce function had a .cancel method, you'd call it here.
-          // Since our simple one doesn't, we just delete it. The timeout will expire harmlessly.
           saveTimers.delete(groupId);
       }
-      delete yDocs[groupId];
+      yDocs.delete(groupId);
     }
   }
 };
-
 setInterval(cleanupUnusedDocs, 60 * 60 * 1000);
 
 export { app, io, server, getReceiverSocketId };

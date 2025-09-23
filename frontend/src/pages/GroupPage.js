@@ -9,7 +9,6 @@ import GroupInfo from "./GroupInfo";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-
 export default function GroupPage() {
   const { socket } = React.useContext(SocketContext);
   const navigate = useNavigate();
@@ -29,13 +28,8 @@ export default function GroupPage() {
   const chatEndRef = useRef(null);
   const unbindEditorRef = useRef(null);
 
-  const userId = localStorage.getItem("user-data")
-    ? JSON.parse(localStorage.getItem("user-data"))._id
-    : null;
-  const username = localStorage.getItem("user-data")
-    ? JSON.parse(localStorage.getItem("user-data")).username
-    : "";
-
+  const userId = localStorage.getItem("user-data") ? JSON.parse(localStorage.getItem("user-data"))._id : null;
+  const username = localStorage.getItem("user-data") ? JSON.parse(localStorage.getItem("user-data")).username : "";
   const { groupId } = useParams();
 
   const bindEditorToYjs = useCallback((editor, yText) => {
@@ -44,6 +38,7 @@ export default function GroupPage() {
     model.setValue(yText.toString());
     let updatingFromYjs = false;
 
+    // This observer pushes remote changes FROM Y.js INTO the editor
     const yjsObserver = () => {
       updatingFromYjs = true;
       const yContent = yText.toString();
@@ -58,6 +53,7 @@ export default function GroupPage() {
     };
     yText.observe(yjsObserver);
 
+    // This listener pushes local editor changes FROM the editor INTO Y.js
     const editorListener = editor.onDidChangeModelContent(() => {
       if (updatingFromYjs) return;
       const value = editor.getValue();
@@ -81,12 +77,10 @@ export default function GroupPage() {
 
   useEffect(() => {
     if (!groupId || !socket) return;
-
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
 
     const handleDocSync = (docState) => {
-      console.log("Applying full document sync from server...");
       Y.applyUpdate(ydoc, new Uint8Array(docState), 'remote');
     };
     socket.on("document-sync", handleDocSync);
@@ -98,7 +92,8 @@ export default function GroupPage() {
 
     const observer = (update, origin) => {
       if (origin !== 'remote') {
-        socket.emit("document-change", { groupId, update: Array.from(update) });
+        // Send the raw binary update, not an Array.from() copy
+        socket.emit("document-change", { groupId, update });
       }
     };
     ydoc.on("update", observer);
@@ -113,19 +108,15 @@ export default function GroupPage() {
     };
   }, [groupId, socket]);
 
- 
   useEffect(() => {
     if (!ydocRef.current || !editorRef.current) return;
-    if (unbindEditorRef.current) {
-      unbindEditorRef.current();
-    }
+    if (unbindEditorRef.current) unbindEditorRef.current();
+    
     const yText = ydocRef.current.getText(language);
     yTextRef.current = yText;
     undoManagerRef.current = new Y.UndoManager(yText);
     unbindEditorRef.current = bindEditorToYjs(editorRef.current, yText);
-    
   }, [language, bindEditorToYjs]);
-
 
   useEffect(() => {
     if (!socket || !groupId) return;
