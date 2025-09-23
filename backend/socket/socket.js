@@ -53,7 +53,10 @@ io.on("connection", (socket) => {
   const jwt = parsedCookies.jwt;
 
   if (!jwt) {
-    console.log("❌ JWT token not found in cookies, disconnecting socket:", socket.id);
+    console.log(
+      "❌ JWT token not found in cookies, disconnecting socket:",
+      socket.id
+    );
     socket.disconnect();
     return;
   }
@@ -77,18 +80,21 @@ io.on("connection", (socket) => {
         const groupData = await groupModel.findById(groupId);
         if (groupData && groupData.code) {
           // LOG: See what data is being loaded from the database
-          console.log(`SERVER: Data loaded from DB for group ${groupId}:`, JSON.stringify(groupData.code));
-          
-          groupData.code.forEach(langData => {
+          console.log(
+            `SERVER: Data loaded from DB for group ${groupId}:`,
+            JSON.stringify(groupData.code)
+          );
+
+          groupData.code.forEach((langData) => {
             doc.getText(langData.language).insert(0, langData.content);
           });
         }
       }
-      
+
       const doc = yDocs.get(groupId);
       const docState = Y.encodeStateAsUpdate(doc);
       socket.emit("document-sync", docState);
-      
+
       const group = await groupModel.findById(groupId).populate("messages");
       if (group) {
         socket.emit("previousMessages", group.messages);
@@ -101,43 +107,45 @@ io.on("connection", (socket) => {
 
   // In your socket.js file
 
-socket.on("document-change", ({ groupId, update }) => {
-  try {
-    const doc = yDocs.get(groupId);
-    if (!doc) return;
-    
-    // 👇 BEST PRACTICE: Ensure the update is a Uint8Array before applying it.
-    Y.applyUpdate(doc, new Uint8Array(update), 'remote');
-    
-    // Broadcast to other clients in the room
-    socket.broadcast.to(groupId).emit("document-update", update);
+  socket.on("document-change", ({ groupId, update }) => {
+    try {
+      const doc = yDocs.get(groupId);
+      if (!doc) return; // 👇 BEST PRACTICE: Ensure the update is a Uint8Array before applying it.
+      Y.applyUpdate(doc, new Uint8Array(update), "remote"); // Broadcast to other clients in the room
+      socket.broadcast.to(groupId).emit("document-update", update); // Your debounced saving logic remains the same and will now work correctly.
 
-    // Your debounced saving logic remains the same and will now work correctly.
-    if (!saveTimers.has(groupId)) {
-      const debouncedSave = debounce(async () => {
-        try {
-          const groupDoc = yDocs.get(groupId);
-          if (!groupDoc) return;
-          
-          const languages = ['cpp', 'python', 'javascript'];
-          const codePayload = languages.map(lang => ({
-            language: lang,
-            content: groupDoc.getText(lang).toString()
-          }));
-          
-          await groupModel.findByIdAndUpdate(groupId, { $set: { code: codePayload } });
-          console.log(`SERVER: Code for group ${groupId} saved successfully.`);
-        } catch (dbError) {
-          console.error(`SERVER DB ERROR: Failed to save code for group ${groupId}:`, dbError);
-        }
-      }, 2500);
-      saveTimers.set(groupId, debouncedSave);
-    }
-    saveTimers.get(groupId)();
-  } catch (error) {
-    console.error(`SERVER RUNTIME ERROR in 'document-change':`, error);
-  }
-});
+      if (!saveTimers.has(groupId)) {
+        const debouncedSave = debounce(async () => {
+          try {
+            const groupDoc = yDocs.get(groupId);
+            if (!groupDoc) return;
+            const languages = ["cpp", "python", "javascript"]; // In socket.js (This code is correct and does not need changes)
+            const codePayload = languages.map((lang) => ({
+              language: lang,
+              content: groupDoc.getText(lang).toString(),
+            }));
+
+            // This will now match the updated schema
+            await groupModel.findByIdAndUpdate(groupId, {
+              $set: { code: codePayload },
+            });
+            console.log(
+              `SERVER: Code for group ${groupId} saved successfully.`
+            );
+          } catch (dbError) {
+            console.error(
+              `SERVER DB ERROR: Failed to save code for group ${groupId}:`,
+              dbError
+            );
+          }
+        }, 2500);
+        saveTimers.set(groupId, debouncedSave);
+      }
+      saveTimers.get(groupId)();
+    } catch (error) {
+      console.error(`SERVER RUNTIME ERROR in 'document-change':`, error);
+    }
+  });
 
   socket.on("leaveGroup", (groupId) => {
     socket.leave(groupId);
@@ -176,7 +184,7 @@ socket.on("document-change", ({ groupId, update }) => {
           sendername: "MetaAI",
           sender: new mongoose.Types.ObjectId(process.env.GEMINI_USER_ID),
           group: groupId,
-          message: geminiReply
+          message: geminiReply,
         });
         await aiMessage.save();
         group.messages.push(aiMessage._id);
@@ -204,7 +212,7 @@ const cleanupUnusedDocs = () => {
     if (!room || room.size === 0) {
       const timer = saveTimers.get(groupId);
       if (timer) {
-          saveTimers.delete(groupId);
+        saveTimers.delete(groupId);
       }
       yDocs.delete(groupId);
     }
