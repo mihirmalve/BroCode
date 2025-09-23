@@ -20,38 +20,52 @@ const debounce = (func, delay) => {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
 const app = express();
 const server = http.createServer(app);
+
 const io = new Server(server, {
   cors: {
-    origin: [
-      "https://b2code.netlify.app",
-      "http://localhost:3000"    
-    ],
+    origin: ["https://b2code.netlify.app", "http://localhost:3000"],
     methods: ["GET", "POST"],
     credentials: true,
   },
 });
+
 const userSocketMap = {};
 const yDocs = new Map();
 const saveTimers = new Map();
 
+// THIS IS THE FUNCTION THAT WAS MISSING FROM YOUR DEPLOY
+const getReceiverSocketId = (receiverId) => {
+  return userSocketMap[receiverId];
+};
+
 io.on("connection", (socket) => {
   const cookieHeader = socket.handshake.headers.cookie;
+
   if (!cookieHeader) {
+    console.log("❌ No cookies, disconnecting socket:", socket.id);
     socket.disconnect();
     return;
   }
+
   const parsedCookies = cookie.parse(cookieHeader);
   const jwt = parsedCookies.jwt;
+
   if (!jwt) {
+    console.log("❌ JWT token not found in cookies, disconnecting socket:", socket.id);
     socket.disconnect();
     return;
   }
+
+  console.log("a user connected", socket.id);
+
   const userId = socket.handshake.query.userId;
   if (userId != "undefined") {
     userSocketMap[userId] = socket.id;
   }
+
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
   socket.on("joinGroup", async (groupId) => {
@@ -71,7 +85,6 @@ io.on("connection", (socket) => {
 
       const doc = yDocs.get(groupId);
       const docState = Y.encodeStateAsUpdate(doc);
-      // Send the raw binary state
       socket.emit("document-sync", docState);
 
       const group = await groupModel.findById(groupId).populate("messages");
@@ -80,6 +93,7 @@ io.on("connection", (socket) => {
       }
     } catch (error) {
       console.error("Error in joinGroup:", error);
+      socket.emit("error", { message: error.message });
     }
   });
 
@@ -88,10 +102,7 @@ io.on("connection", (socket) => {
       const doc = yDocs.get(groupId);
       if (!doc) return;
       
-      // Apply the raw binary update with 'remote' origin
       Y.applyUpdate(doc, update, 'remote');
-      
-      // Broadcast the raw binary update
       socket.to(groupId).emit("document-update", update);
 
       if (!saveTimers.has(groupId)) {
@@ -180,7 +191,7 @@ io.on("connection", (socket) => {
 });
 
 const cleanupUnusedDocs = () => {
-  for (const groupId in yDocs) {
+  for (const groupId of yDocs.keys()) {
     const room = io.sockets.adapter.rooms.get(groupId);
     if (!room || room.size === 0) {
       const timer = saveTimers.get(groupId);
